@@ -317,24 +317,28 @@ async function botTurn(lobbyId, db) {
             const bot = current.players.find(p => p.uid === botSnap.uid);
             if (!bot || bot.is_dead) continue;
 
-            // 1. Spend all coins: prefer slicer over cannon (more aggressive)
+            // 1. Spend coins on items — must reserve use_cost coins for each weapon bought
             let coinsLeft = bot.coins;
             while (coinsLeft > 0) {
-                const itemKeys = Object.keys(SHOP_ITEMS);
                 // Pick: slicer first, then canon, then shield
                 const preferred = ['slicer', 'canon', 'shields'];
-                const item = preferred.find(k => bot[k] < SHOP_ITEMS[k].max) || itemKeys.find(k => bot[k] < SHOP_ITEMS[k].max);
-                if (!item) break;
+                const item = preferred.find(k => {
+                    const cfg = SHOP_ITEMS[k];
+                    const totalCost = cfg.cost + cfg.use_cost; // buy + use cost
+                    return bot[k] < cfg.max && coinsLeft >= totalCost;
+                });
+                if (!item) break; // can't afford anything with remaining coins
+                const buyCost = SHOP_ITEMS[item].cost;
                 await db.collection('lobbies').updateOne(
                     { _id: lobbyId, 'players.uid': bot.uid },
-                    { $inc: { 'players.$.coins': -1, [`players.$.${item}`]: 1 }, $set: { updated_at: new Date() } }
+                    { $inc: { 'players.$.coins': -buyCost, [`players.$.${item}`]: 1 }, $set: { updated_at: new Date() } }
                 );
                 bot[item] = (bot[item] || 0) + 1;
-                bot.coins -= 1;
-                coinsLeft--;
+                bot.coins -= buyCost;
+                coinsLeft -= buyCost;
             }
 
-            // 2. Use ALL weapons — attack until no weapons left
+            // 2. Use ALL weapons — attack until no weapons left or can't afford use cost
             let attackLoop = 0;
             while (attackLoop < 10) {
                 attackLoop++;
@@ -344,20 +348,24 @@ async function botTurn(lobbyId, db) {
                 const freshBot = freshLobby.players.find(p => p.uid === bot.uid);
                 if (!freshBot || freshBot.is_dead) break;
 
-                const weapon = freshBot.canon > 0 ? 'canon' : freshBot.slicer > 0 ? 'slicer' : null;
-                if (!weapon) break; // no weapons left
+                // Pick weapon bot can afford to use (has weapon + enough coins for use_cost)
+                let weapon = null;
+                if (freshBot.canon > 0 && (freshBot.coins || 0) >= SHOP_ITEMS.canon.use_cost) weapon = 'canon';
+                else if (freshBot.slicer > 0 && (freshBot.coins || 0) >= SHOP_ITEMS.slicer.use_cost) weapon = 'slicer';
+                if (!weapon) break; // no usable weapons
 
-                // Pick a random alive enemy (bots attack ANY alive player, including other bots)
+                // Pick a random alive enemy
                 const enemies = freshLobby.players.filter(p => !p.is_dead && p.uid !== bot.uid);
                 if (enemies.length === 0) break;
                 const target = enemies[Math.floor(Math.random() * enemies.length)];
                 const freshTarget = freshLobby.players.find(p => p.uid === target.uid);
                 if (!freshTarget || freshTarget.is_dead) continue;
 
-                // Decrement weapon
+                const useCost = SHOP_ITEMS[weapon].use_cost;
+                // Decrement weapon and deduct use cost
                 await db.collection('lobbies').updateOne(
                     { _id: lobbyId, 'players.uid': freshBot.uid },
-                    { $inc: { [`players.$.${weapon}`]: -1 }, $set: { updated_at: new Date() } }
+                    { $inc: { [`players.$.${weapon}`]: -1, 'players.$.coins': -useCost }, $set: { updated_at: new Date() } }
                 );
 
                 // Apply effect
@@ -789,6 +797,43 @@ module.exports = async (req, res) => {
             }
 
             return res.json({ success: true });
+        }
+
+        if (action === 'redeem_promo') {
+            const { lobby_id, uid, code } = req.body;
+            if (!lobby_id || !uid || !code) return res.json({ error: 'Missing parameters' });
+
+            const PROMO_CODES = {
+                'ELITEIT': { coins: 10, label: '10 coins' }
+            };
+
+            const promo = PROMO_CODES[code.toUpperCase()];
+            if (!promo) return res.json({ error: 'Invalid promo code' });
+
+            const lobby = await db.collection('lobbies').findOne({ _id: lobby_id });
+            if (!lobby) return res.json({ error: 'Lobby not found' });
+
+            const player = lobby.players.find(p => p.uid === uid);
+            if (!player) return res.json({ error: 'Player not found' });
+
+            // Check if this player already used this code
+            const usedCodes = player.used_promos || [];
+            if (usedCodes.includes(code.toUpperCase())) {
+                return res.json({ error: 'You already used this code' });
+            }
+
+            // Grant coins and mark code as used
+            await db.collection('lobbies').updateOne(
+                { _id: lobby_id, 'players.uid': uid },
+                {
+                    $inc: { 'players.$.coins': promo.coins },
+                    $push: { 'players.$.used_promos': code.toUpperCase() },
+                    $set: { updated_at: new Date() }
+                }
+            );
+
+            await pusher.trigger(`game-${lobby_id}`, 'state-update', {});
+            return res.json({ success: true, message: `+${promo.coins} coins added! 🎉` });
         }
 
         if (action === 'next_round') {

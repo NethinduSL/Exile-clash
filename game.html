@@ -129,6 +129,10 @@
         .players-scroll {
             flex: 1; overflow-y: auto; padding: 14px;
             -webkit-overflow-scrolling: touch;
+            display: flex; flex-direction: column;
+        }
+        .players-scroll .players-grid {
+            flex: 1;
         }
         .players-scroll::-webkit-scrollbar { width: 3px; }
         .players-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
@@ -137,6 +141,8 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
             gap: 10px;
+            height: 100%;
+            align-content: start;
         }
 
         /* ── PLAYER CARD ── */
@@ -180,7 +186,7 @@
         }
 
         .island-wrap {
-            width: 100%; flex: 1; min-height: 80px; position: relative;
+            width: 100%; flex: 1; min-height: 90px; position: relative;
         }
         .island-img {
             position: absolute; inset: 0;
@@ -656,6 +662,21 @@
 
         function renderPlayers() {
             const grid = document.getElementById('players-grid');
+            const count = gameState.players.length;
+
+            // Dynamically size columns so cards fill the space
+            // fewer players = bigger cards
+            let cols, minCard;
+            if      (count <= 2)  { cols = count;    minCard = 'minmax(0,1fr)'; }
+            else if (count <= 4)  { cols = 2;         minCard = 'minmax(0,1fr)'; }
+            else if (count <= 6)  { cols = 3;         minCard = 'minmax(0,1fr)'; }
+            else if (count <= 9)  { cols = 3;         minCard = 'minmax(120px,1fr)'; }
+            else                  { cols = 4;         minCard = 'minmax(110px,1fr)'; }
+            grid.style.gridTemplateColumns = `repeat(${cols}, ${minCard})`;
+
+            // Island image height scales with card size
+            const islandH = count <= 2 ? '220px' : count <= 4 ? '150px' : count <= 6 ? '110px' : '90px';
+
             grid.innerHTML = gameState.players.map(p => {
                 const isYou  = p.uid === userId;
                 const isDead = p.is_dead;
@@ -672,7 +693,7 @@
                 return `<div class="player-card ${isYou?'you':''} ${isDead?'dead':''} ${isBot?'bot':''}">
                     ${rLabel ? `<div class="rps-result ${rCls}">${rLabel}</div>` : ''}
                     <div class="shields-row">${shields}</div>
-                    <div class="island-wrap">
+                    <div class="island-wrap" style="min-height:${islandH}">
                         <div class="island-img ${dmgCls}" style="background-image:url('img/il/${p.island}.png')">
                             <div class="island-damage" style="background-image:url('img/il/${p.island}.png')"></div>
                         </div>

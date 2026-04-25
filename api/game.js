@@ -32,9 +32,9 @@ const pusher = new Pusher({
 });
 
 const SHOP_ITEMS = {
-    shields: { cost: 1, max: 3 },
-    canon: { cost: 1, max: 3 },
-    slicer: { cost: 1, max: 3 }
+    shields: { cost: 1, max: 3, use_cost: 0 },  // auto-used, no use cost
+    canon:   { cost: 1, max: 3, use_cost: 1 },  // costs 1 to buy + 1 to use = 2 total
+    slicer:  { cost: 1, max: 3, use_cost: 1 }   // costs 1 to buy + 1 to use = 2 total
 };
 
 const PHASE_DURATIONS = { rps: 15, coin: 20 };
@@ -728,14 +728,18 @@ module.exports = async (req, res) => {
                 return res.json({ error: 'Invalid players' });
             }
             if (lobby.phase !== 'coin') return res.json({ error: 'Not coin phase' });
+            if (item === 'shields') return res.json({ error: 'Shields are used automatically' });
+            const itemConfig = SHOP_ITEMS[item];
+            if (!itemConfig) return res.json({ error: 'Invalid item' });
             if (player[item] <= 0) return res.json({ error: 'No items' });
+            const useCost = itemConfig.use_cost || 0;
+            if ((player.coins || 0) < useCost) return res.json({ error: `Need ${useCost} coin(s) to use this item` });
 
-            // FIX: Use separate atomic updates instead of arrayFilters to avoid multi-filter conflicts
-            // Decrement attacker's item
+            // Decrement item and deduct use cost
             await db.collection('lobbies').updateOne(
                 { _id: lobby_id, 'players.uid': uid },
                 {
-                    $inc: { [`players.$.${item}`]: -1 },
+                    $inc: { [`players.$.${item}`]: -1, 'players.$.coins': -useCost },
                     $set: { updated_at: new Date() }
                 }
             );

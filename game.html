@@ -751,18 +751,22 @@
 
         function renderShop(me) {
             const items = [
-                { id:'shields', icon:'🛡️', name:'Shield',  desc:'Block 1 hit',    cost:1, max:3 },
-                { id:'canon',   icon:'💣', name:'Cannon',  desc:'Break a shield', cost:1, max:3 },
-                { id:'slicer',  icon:'⚔️', name:'Slicer',  desc:'Deal 1 damage',  cost:1, max:3 }
+                { id:'shields', icon:'🛡️', name:'Shield',  desc:'Auto-blocks 1 hit',      cost:1, useCost:0, max:3 },
+                { id:'canon',   icon:'💣', name:'Cannon',  desc:'Break a shield',          cost:1, useCost:1, max:3 },
+                { id:'slicer',  icon:'⚔️', name:'Slicer',  desc:'Deal 1 damage',           cost:1, useCost:1, max:3 }
             ];
             document.getElementById('shop').innerHTML = items.map(item => {
                 const owned  = me[item.id] || 0;
                 const canBuy = me.coins >= item.cost && owned < item.max;
+                const useLabel = item.useCost > 0
+                    ? `<div style="font-size:10px;opacity:0.7;margin-top:1px;">use: <i class="fa-solid fa-coins"></i> ${item.useCost}</div>`
+                    : `<div style="font-size:10px;opacity:0.7;margin-top:1px;">auto-use</div>`;
                 return `<button class="shop-btn" onclick="buyItem('${item.id}')" ${!canBuy?'disabled':''}>
                     <div class="s-icon">${item.icon}</div>
                     <div class="s-name">${item.name}</div>
                     <div class="s-desc">${item.desc}</div>
                     <div class="s-cost"><i class="fa-solid fa-coins"></i> ${item.cost}</div>
+                    ${useLabel}
                     <div class="s-owned">${owned}/${item.max}</div>
                 </button>`;
             }).join('');
@@ -771,17 +775,24 @@
         function renderInventory(me) {
             const inv   = document.getElementById('inventory');
             const items = [];
-            if (me.canon  > 0) items.push({ id:'canon',  icon:'💣', name:'Cannon', count: me.canon  });
-            if (me.slicer > 0) items.push({ id:'slicer', icon:'⚔️', name:'Slicer', count: me.slicer });
+            // Shields are auto-used, so only show canon and slicer in inventory
+            if (me.canon  > 0) items.push({ id:'canon',  icon:'💣', name:'Cannon', count: me.canon,  useCost: 1 });
+            if (me.slicer > 0) items.push({ id:'slicer', icon:'⚔️', name:'Slicer', count: me.slicer, useCost: 1 });
             if (!items.length) {
                 inv.innerHTML = '<div style="opacity:0.45;font-size:12px;width:100%;font-weight:600;">No weapons yet</div>';
                 return;
             }
-            inv.innerHTML = items.map(item => `
-                <button class="inv-btn ${targetMode===item.id?'active':''}" onclick="selectTarget('${item.id}')">
+            inv.innerHTML = items.map(item => {
+                const canAfford = (me.coins || 0) >= item.useCost;
+                const isActive  = targetMode === item.id;
+                return `<button class="inv-btn ${isActive ? 'active' : ''}"
+                    ${canAfford ? `onclick="selectTarget('${item.id}')"` : `disabled title="Need ${item.useCost} coin to use"`}
+                    style="${canAfford ? '' : 'opacity:0.4;cursor:not-allowed;'}">
                     ${item.icon} ${item.name}
                     <span class="inv-count">${item.count}</span>
-                </button>`).join('');
+                    <span style="font-size:10px;color:var(--gold);font-weight:900;margin-left:3px;"><i class="fa-solid fa-coins"></i> ${item.useCost}</span>
+                </button>`;
+            }).join('');
         }
 
         function renderTargetPanel(me) {
